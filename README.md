@@ -32,7 +32,7 @@ prompt it would send to Claude (a "dry run"), so you can see it working today.
 ## Options
 - **Your own data:** set `ARCHIVE_URL` in `.env` to a JSON endpoint of saved sessions (e.g. a Firebase Realtime DB `.json` URL). Unset = demo mode with `sample-archive.json`.
 - **Model:** `MODEL` in `brief.js` is `claude-haiku-4-5` (cheap, ~$0.001/brief). Use `claude-opus-4-8` for max quality.
-- **Auto-post to Slack:** add a Slack Incoming Webhook URL to `SLACK_WEBHOOK_URL` in `.env`.
+- **Slack DM:** set `SLACK_BOT_TOKEN` (a Slack app bot token) and `SLACK_DM_TO` (your Slack user ID) in `.env` to have the brief DM'd to you.
 - **Run it every morning:** schedule `npm run brief` with Windows Task Scheduler.
 
 ## How it works (the 3 steps)

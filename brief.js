@@ -134,12 +134,21 @@ console.log(`\n\u{1F4E6} Picker Productivity Brief — ${date}\n`);
 console.log(brief);
 console.log(`\n(model: ${MODEL} · ${res.usage.input_tokens} in / ${res.usage.output_tokens} out tokens)`);
 
-// ---- optional: post to Slack if a webhook is configured ----
-if (process.env.SLACK_WEBHOOK_URL) {
-  await fetch(process.env.SLACK_WEBHOOK_URL, {
+// ---- optional: DM the brief to yourself on Slack ----
+// Set SLACK_BOT_TOKEN (xoxb-...) and SLACK_DM_TO (your Slack user ID) in .env.
+// It DMs *you*, so you can copy it into whatever channel you want.
+if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_DM_TO) {
+  const r = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: `*📦 Picker Productivity Brief — ${date}*\n\n${brief}` }),
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+    },
+    body: JSON.stringify({
+      channel: process.env.SLACK_DM_TO,
+      text: `*📦 Picker Productivity Brief — ${date}*\n\n${brief}`,
+    }),
   });
-  console.log("\n✅ Posted to Slack.");
+  const j = await r.json();
+  console.log(j.ok ? "\n✅ Sent to your Slack DM." : `\n⚠️ Slack error: ${j.error}`);
 }
