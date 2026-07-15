@@ -1,0 +1,55 @@
+{
+  "tracker:2026-03-02:16-00-00-000": {
+    "date": "2026-03-02",
+    "shift": "Day",
+    "area": "Outbound",
+    "lead": "Sample Lead",
+    "totalCases": 3120,
+    "associates": [
+      {
+        "name": "Alex Rivera",
+        "segments": [
+          { "start": "07:00", "end": "10:00", "cases": "620", "shipment": "Orion", "arc": "MCC1", "line": "2" },
+          { "start": "10:15", "end": "12:00", "cases": "360", "shipment": "Orion", "arc": "MCC1", "line": "2" },
+          { "start": "12:30", "end": "15:30", "cases": "540", "shipment": "Vega", "arc": "MCC2", "line": "4" }
+        ]
+      },
+      {
+        "name": "Jordan Kim",
+        "segments": [
+          { "start": "07:00", "end": "11:00", "cases": "700", "shipment": "Orion", "arc": "MCC1", "line": "1" },
+          { "start": "11:30", "end": "15:30", "cases": "900", "shipment": "Vega", "arc": "MCC2", "line": "3" }
+        ]
+      }
+    ]
+  },
+  "tracker:2026-03-03:16-00-00-000": {
+    "date": "2026-03-03",
+    "shift": "Day",
+    "area": "Outbound",
+    "lead": "Sample Lead",
+    "totalCases": 3460,
+    "associates": [
+      {
+        "name": "Alex Rivera",
+        "segments": [
+          { "start": "07:00", "end": "11:00", "cases": "840", "shipment": "Lyra", "arc": "MCC1", "line": "2" },
+          { "start": "11:30", "end": "15:30", "cases": "820", "shipment": "Lyra", "arc": "MCC1", "line": "2" }
+        ]
+      },
+      {
+        "name": "Jordan Kim",
+        "segments": [
+          { "start": "07:00", "end": "10:30", "cases": "540", "shipment": "Lyra", "arc": "MCC2", "line": "3" },
+          { "start": "11:00", "end": "15:30", "cases": "620", "shipment": "Nova", "arc": "MCC2", "line": "4" }
+        ]
+      },
+      {
+        "name": "Sam Torres",
+        "segments": [
+          { "start": "08:00", "end": "12:00", "cases": "400", "shipment": "Nova", "arc": "MCC3", "line": "5" }
+        ]
+      }
+    ]
+  }
+}

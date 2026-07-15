@@ -1,0 +1,13 @@
+{
+  "name": "productivity-brief",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI-generated daily Picker Productivity brief from the Neato ops archive",
+  "scripts": {
+    "brief": "node --env-file=.env brief.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0"
+  }
+}
