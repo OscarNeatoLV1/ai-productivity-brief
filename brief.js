@@ -80,9 +80,26 @@ function statsForDate(all, date) {
 }
 
 // ---- main ----
+// Retry the archive fetch — after the laptop wakes for the 6 AM run, Wi-Fi can
+// take a bit to reconnect, so a not-ready network self-heals instead of failing.
+async function fetchArchive(url, tries = 10, waitMs = 30000) {
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.json();
+    } catch (e) {
+      const reason = (e && e.cause && e.cause.code) || e.message;
+      if (attempt === tries) throw e;
+      console.error(`Fetch attempt ${attempt}/${tries} failed (${reason}); waiting ${waitMs / 1000}s for network...`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+}
+
 let all;
 if (ARCHIVE_URL) {
-  all = await (await fetch(ARCHIVE_URL)).json();
+  all = await fetchArchive(ARCHIVE_URL);
 } else {
   all = JSON.parse(await readFile(new URL("./sample-archive.json", import.meta.url), "utf8"));
   console.log("(demo mode: sample-archive.json — set ARCHIVE_URL in .env for live data)\n");
