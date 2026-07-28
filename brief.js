@@ -22,12 +22,20 @@ const MODEL = "claude-haiku-4-5"; // cheap + great for summaries; "claude-opus-4
 // the Associate Tracker in managers-console/lead-supervisor.html — keep them in sync.
 //
 // flagAbove is the "that can't be real" line for a single segment, and it is NOT
-// a performance bar — it only exists to catch mistyped clock-in/out times. It sat
-// at 400 cs/hr and fired on nearly every day once volume grew, so real 400-700
-// cs/hr segments were being reported as errors. Raise it rather than let the flag
-// get ignored; override with PICK_FLAG_ABOVE / LOAD_FLAG_ABOVE in .env.
+// a performance bar — it only exists to catch mistyped clock-in/out times.
+//
+// Picking sits at 1200 cs/hr, which is Oscar's number, not a multiple of the
+// standard: volume has grown to where 400-700 cs/hr is ordinary output. The old
+// 400 fired on 115 of 437 archived segments across 36 days, and a flag that is
+// wrong that often gets ignored, which costs more than no flag at all. At 1200
+// it catches 6 segments across 5 days — including both halves of the known-bad
+// 2026-06-10 session, which it found without being told about it.
+//
+// Loading's 110 plt/hr is NOT calibrated — there is no loading history yet. It is
+// a placeholder well past physically plausible (a pallet every 33s); revisit once
+// a few weeks of load segments exist. Override either via .env.
 const BASES = {
-  pick: { label: "picking", qtyLabel: "cases", unit: "cs/hr", std: 187, flagAbove: +process.env.PICK_FLAG_ABOVE || 800 },
+  pick: { label: "picking", qtyLabel: "cases", unit: "cs/hr", std: 187, flagAbove: +process.env.PICK_FLAG_ABOVE || 1200 },
   load: { label: "loading", qtyLabel: "pallets", unit: "plt/hr", std: 26, flagAbove: +process.env.LOAD_FLAG_ABOVE || 110 },
 };
 
