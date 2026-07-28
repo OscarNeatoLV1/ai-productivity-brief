@@ -121,14 +121,29 @@ function statsForDate(all, date) {
 // ---- main ----
 // Retry the archive fetch — after the laptop wakes for the 6 AM run, Wi-Fi can
 // take a bit to reconnect, so a not-ready network self-heals instead of failing.
-async function fetchArchive(url, tries = 10, waitMs = 30000) {
+//
+// Each attempt MUST have its own deadline. fetch() has no default timeout, and a
+// half-connected adapter right after wake doesn't refuse the connection, it just
+// never answers — so without a signal the very first attempt hangs forever, the
+// retries below never happen, and Task Scheduler kills the whole run at its time
+// limit having logged nothing at all. That was the 2026-07-28 silent no-brief.
+// Budget: TRIES x TIMEOUT + (TRIES-1) x WAIT must stay under the task's limit.
+const TRIES = +process.env.FETCH_TRIES || 10;
+const TIMEOUT_MS = +process.env.FETCH_TIMEOUT_MS || 15000;
+const WAIT_MS = +process.env.FETCH_WAIT_MS || 30000;
+
+async function fetchArchive(url, tries = TRIES, waitMs = WAIT_MS) {
   for (let attempt = 1; attempt <= tries; attempt++) {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error("HTTP " + res.status);
       return await res.json();
     } catch (e) {
-      const reason = (e && e.cause && e.cause.code) || e.message;
+      // A timeout surfaces as a bare TimeoutError/AbortError, which reads as
+      // nothing useful in the log — name it so the cause is obvious later.
+      const reason = e?.name === "TimeoutError" || e?.name === "AbortError"
+        ? `no response in ${TIMEOUT_MS / 1000}s`
+        : (e?.cause?.code || e.message);
       if (attempt === tries) throw e;
       console.error(`Fetch attempt ${attempt}/${tries} failed (${reason}); waiting ${waitMs / 1000}s for network...`);
       await new Promise((r) => setTimeout(r, waitMs));
