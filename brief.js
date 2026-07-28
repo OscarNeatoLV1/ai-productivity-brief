@@ -21,22 +21,18 @@ const MODEL = "claude-haiku-4-5"; // cheap + great for summaries; "claude-opus-4
 // Two work bases, measured in different units and never mixed. Standards match
 // the Associate Tracker in managers-console/lead-supervisor.html — keep them in sync.
 //
-// flagAbove is the "that can't be real" line for a single segment, and it is NOT
-// a performance bar — it only exists to catch mistyped clock-in/out times.
+// flagAbove is a last-ditch backstop for a fat-fingered quantity (13460 typed for
+// 1346), NOT a plausibility check on how fast someone picked. A high rate is not
+// evidence of a bad entry here: volume has grown to where the floor genuinely
+// turns in huge days, and the fastest segment on record — 2307 cs/hr — is real
+// output. So this sits above everything ever observed and should almost never
+// fire. Real data problems are found structurally instead, see timeIssues().
 //
-// Picking sits at 1200 cs/hr, which is Oscar's number, not a multiple of the
-// standard: volume has grown to where 400-700 cs/hr is ordinary output. The old
-// 400 fired on 115 of 437 archived segments across 36 days, and a flag that is
-// wrong that often gets ignored, which costs more than no flag at all. At 1200
-// it catches 6 segments across 5 days — including both halves of the known-bad
-// 2026-06-10 session, which it found without being told about it.
-//
-// Loading's 110 plt/hr is NOT calibrated — there is no loading history yet. It is
-// a placeholder well past physically plausible (a pallet every 33s); revisit once
-// a few weeks of load segments exist. Override either via .env.
+// (History, so nobody re-tightens this: it started at 400 cs/hr and flagged 115
+// of 439 archived segments across 36 days. Every one was real work.)
 const BASES = {
-  pick: { label: "picking", qtyLabel: "cases", unit: "cs/hr", std: 187, flagAbove: +process.env.PICK_FLAG_ABOVE || 1200 },
-  load: { label: "loading", qtyLabel: "pallets", unit: "plt/hr", std: 26, flagAbove: +process.env.LOAD_FLAG_ABOVE || 110 },
+  pick: { label: "picking", qtyLabel: "cases", unit: "cs/hr", std: 187, flagAbove: +process.env.PICK_FLAG_ABOVE || 3000 },
+  load: { label: "loading", qtyLabel: "pallets", unit: "plt/hr", std: 26, flagAbove: +process.env.LOAD_FLAG_ABOVE || 300 },
 };
 
 // ---- small helpers ----
@@ -46,6 +42,42 @@ const round = (n) => Math.round(n * 10) / 10;
 // Segments gained a `type` when loading was added; rows archived before that are
 // all picking, so a missing type means 'pick'.
 const basisOf = (g) => (g.type === "load" ? "load" : "pick");
+const OVERLAP_TOLERANCE_MIN = +process.env.OVERLAP_TOLERANCE_MIN || 5;
+
+// Structural problems with a person's segment times. These are what a mistyped
+// clock entry actually looks like — an unreadable rate is not, because the floor
+// really does post rates that look impossible.
+//
+// The missing/unparseable case matters most and is the easiest to miss: the
+// quantity still counts but the minutes cannot, so the day's rate comes out
+// TOO HIGH off a real number. Say so in the flag, or the brief quietly reports
+// an inflated rate as fact.
+// `rows` are {g, n} pairs where n is the segment's position in the associate's
+// FULL list — numbering has to match what Oscar sees on the tracker, not the
+// position within the filtered basis.
+function timeIssues(name, rows, basis) {
+  const out = [], spans = [];
+  rows.forEach(({ g, n: i }) => {
+    const qty = Number(basis === "load" ? g.pallets : g.cases);
+    const st = toMin(g.start), en = toMin(g.end);
+    const at = `${name}: seg ${i}`;
+    if (st == null || en == null) {
+      if (!isNaN(qty) && qty > 0)
+        out.push(`${at} has ${qty} ${BASES[basis].qtyLabel} but no usable start/end ("${g.start ?? ""}"-"${g.end ?? ""}"), so its time is missing from the day — the rate shown is higher than reality until it's filled in`);
+    } else if (en < st) out.push(`${at} ends before it starts (${g.start}-${g.end})`);
+    else if (en === st && qty > 0) out.push(`${at} has ${qty} ${BASES[basis].qtyLabel} in zero minutes (${g.start}-${g.end})`);
+    else spans.push([st, en, i]);
+  });
+  // A minute or two of overlap is just one segment's end typed a hair after the
+  // next one's start. Only a real overlap means a clock entry is actually wrong.
+  spans.sort((a, b) => a[0] - b[0]);
+  for (let i = 1; i < spans.length; i++) {
+    const by = spans[i - 1][1] - spans[i][0];
+    if (by > OVERLAP_TOLERANCE_MIN)
+      out.push(`${name}: seg ${spans[i][2]} overlaps seg ${spans[i - 1][2]} by ${by} min — one clock entry is likely wrong`);
+  }
+  return out;
+}
 
 // ---- 1) compute stats for one date ----
 // One basis (picking or loading) rolled up into the numbers the brief talks about.
@@ -74,7 +106,13 @@ function statsForDate(all, date) {
     for (const a of arr(s.associates).filter(Boolean)) {
       const name = (a.name || "").trim() || "(blank name)";
       const p = (people[name] = people[name] || { pick: { qty: 0, mins: 0 }, load: { qty: 0, mins: 0 } });
-      arr(a.segments).filter(Boolean).forEach((g, i) => {
+      const segs = arr(a.segments).filter(Boolean);
+      // Overlap only means something within one basis — picking and loading are
+      // different work and a person can legitimately do both in a day.
+      const rows = segs.map((g, i) => ({ g, n: i + 1 }));
+      for (const k of Object.keys(BASES))
+        flags.push(...timeIssues(name, rows.filter((r) => basisOf(r.g) === k), k));
+      segs.forEach((g, i) => {
         const key = basisOf(g);
         const basis = BASES[key], bucket = p[key];
         // Quantity lives in `pallets` for loading and `cases` for picking. Never
