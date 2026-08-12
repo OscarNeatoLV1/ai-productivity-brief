@@ -243,7 +243,17 @@ if (!process.env.ANTHROPIC_API_KEY) {
   process.exit(0);
 }
 
-const client = new Anthropic(); // reads ANTHROPIC_API_KEY
+// Timeout and retries are set EXPLICITLY. The SDK defaults are timeout = 10 min and
+// maxRetries = 2, and timeouts are themselves retried — so one hung call can burn ~30
+// min of wall clock while Task Scheduler kills this run at 15. That is exactly how the
+// 2026-08-12 brief died: the archive fetch retried correctly (hardened in July), then
+// this call hung past the limit and logged nothing at all.
+// 60s is generous for a ~250-output-token brief; worst case is now 3 x 60s.
+const client = new Anthropic({ timeout: 60_000, maxRetries: 2 });
+
+// Log before each network stage. Without this a hang leaves NO line in brief.log and
+// there is no way to tell which of the three calls wedged.
+console.log("Calling Claude...");
 const res = await client.messages.create({
   model: MODEL,
   max_tokens: 1024,
@@ -260,17 +270,27 @@ console.log(`\n(model: ${MODEL} · ${res.usage.input_tokens} in / ${res.usage.ou
 // Set SLACK_BOT_TOKEN (xoxb-...) and SLACK_DM_TO (your Slack user ID) in .env.
 // It DMs *you*, so you can copy it into whatever channel you want.
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_DM_TO) {
-  const r = await fetch("https://slack.com/api/chat.postMessage", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
-    },
-    body: JSON.stringify({
-      channel: process.env.SLACK_DM_TO,
-      text: `*📦 Outbound Productivity Brief — ${date}*\n\n${brief}`,
-    }),
-  });
-  const j = await r.json();
-  console.log(j.ok ? "\n✅ Sent to your Slack DM." : `\n⚠️ Slack error: ${j.error}`);
+  console.log("Sending to Slack...");
+  // Same failure mode as the archive fetch: a bare fetch() has NO default timeout, so a
+  // half-connected adapter after wake-from-sleep never answers rather than refusing.
+  // The brief has already printed above, so a Slack failure is logged and swallowed
+  // instead of taking down a run whose real work is done.
+  try {
+    const r = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+      },
+      body: JSON.stringify({
+        channel: process.env.SLACK_DM_TO,
+        text: `*📦 Outbound Productivity Brief — ${date}*\n\n${brief}`,
+      }),
+    });
+    const j = await r.json();
+    console.log(j.ok ? "\n✅ Sent to your Slack DM." : `\n⚠️ Slack error: ${j.error}`);
+  } catch (e) {
+    console.log(`\n⚠️ Slack send failed (${e.name}): ${e.message}`);
+  }
 }
