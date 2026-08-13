@@ -180,6 +180,14 @@ const WAIT_MS = +process.env.FETCH_WAIT_MS || 30000;
 
 async function fetchArchive(url, tries = TRIES, waitMs = WAIT_MS) {
   for (let attempt = 1; attempt <= tries; attempt++) {
+    // Log BEFORE the call, not only on failure. Three silent no-briefs (07-28,
+    // 08-12, 08-13) all left a log that could not distinguish "never reached the
+    // fetch" from "wedged inside an attempt" — the only two states worth telling
+    // apart. On 08-12 a single failure line was followed by 14 minutes of silence,
+    // meaning attempt 2 hung and its own AbortSignal.timeout never fired; that
+    // shouldn't be possible, so the next occurrence needs to show which attempt
+    // owns the hang rather than leaving it to be inferred.
+    console.error(`Archive fetch attempt ${attempt}/${tries}...`);
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
       if (!res.ok) throw new Error("HTTP " + res.status);
