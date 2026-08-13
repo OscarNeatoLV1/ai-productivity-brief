@@ -4,3 +4,4 @@ node_modules
 !.env.example
 *.log
 run-brief.bat
+.last-sent.json

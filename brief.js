@@ -10,7 +10,7 @@
 // prompt it *would* send to Claude, so you can see it working today.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 
 // Set ARCHIVE_URL in .env to your own data source (a JSON endpoint of saved
 // sessions). If it's unset, the app runs in demo mode against sample-archive.json
@@ -205,6 +205,32 @@ async function fetchArchive(url, tries = TRIES, waitMs = WAIT_MS) {
   }
 }
 
+// ---- deliver at most once per calendar day ----
+// Four triggers now start this task (6 AM, logon, unlock, resume-from-sleep) so that a
+// 6 AM run which lost the network is covered by the next time the laptop is opened.
+// That is only safe if a repeat run is a cheap no-op, so this guard sits BEFORE the
+// archive fetch and touches no network. Slack is otherwise the ONLY record that a brief
+// went out, so this marker file is the idempotency key — don't delete it casually.
+const SENT_MARKER = new URL("./.last-sent.json", import.meta.url);
+// Local date, deliberately NOT toISOString(): the laptop runs Pacific, where a UTC date
+// rolls over at 4/5 PM local, which would let a single calendar day deliver twice.
+const localDay = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const FORCE = process.argv.includes("--force");
+
+if (!FORCE) {
+  try {
+    const seen = JSON.parse(await readFile(SENT_MARKER, "utf8"));
+    if (seen.sentOn === localDay()) {
+      console.log(`Already delivered today (${seen.sentOn} — brief covered ${seen.briefedDate}). Pass --force to send anyway.`);
+      process.exit(0);
+    }
+  } catch {
+    // No marker yet, or it's unreadable/corrupt. Fall through and send: a missing
+    // marker must never be the reason a brief is skipped.
+  }
+}
+
 let all;
 if (ARCHIVE_URL) {
   all = await fetchArchive(ARCHIVE_URL);
@@ -213,7 +239,9 @@ if (ARCHIVE_URL) {
   console.log("(demo mode: sample-archive.json — set ARCHIVE_URL in .env for live data)\n");
 }
 const dates = [...new Set(Object.values(all).map((s) => s?.date).filter(Boolean))].sort();
-const date = process.argv[2] || dates[dates.length - 1];
+// Skip flags when looking for the optional YYYY-MM-DD argument — otherwise `--force`
+// lands here as the requested date and the run dies with "No sessions for --force".
+const date = process.argv.slice(2).find((a) => !a.startsWith("--")) || dates[dates.length - 1];
 if (!dates.includes(date)) {
   console.error(`No sessions for ${date}. Available: ${dates.slice(-8).join(", ")}`);
   process.exit(1);
@@ -298,6 +326,9 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_DM_TO) {
     });
     const j = await r.json();
     console.log(j.ok ? "\n✅ Sent to your Slack DM." : `\n⚠️ Slack error: ${j.error}`);
+    // ONLY a confirmed send marks the day done. If Slack failed, leave the marker
+    // untouched so the next trigger retries rather than assuming delivery happened.
+    if (j.ok) await writeFile(SENT_MARKER, JSON.stringify({ sentOn: localDay(), briefedDate: date }) + "\n");
   } catch (e) {
     console.log(`\n⚠️ Slack send failed (${e.name}): ${e.message}`);
   }
