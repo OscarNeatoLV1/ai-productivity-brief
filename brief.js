@@ -52,6 +52,10 @@ const BAND_LABELS = ["1 case or less", "2-6 cases", "7-48 cases", "49-95 cases",
 const arr = (x) => (Array.isArray(x) ? x : x && typeof x === "object" ? Object.values(x) : []);
 const round = (n) => Math.round(n * 10) / 10;
 const sum = (xs) => xs.reduce((s, x) => s + (x || 0), 0);
+// Deliberately regex-free: the escaping round-trip through the shell ate the
+// backslash in \S twice, leaving /S+/g — which quietly matched nothing and passed
+// every name through unchanged. A split/join can't be mangled that way.
+const titleCase = (n) => n.split(" ").map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w)).join(" ");
 
 // ---- 1) compute stats for one sealed day ----
 //
@@ -93,8 +97,13 @@ function loadRow({ pallets, loads, spanMin, hrs, palletsPerHr, pct }) {
   return {
     pallets: pallets || 0,
     loads: loads ?? null,
-    spanMinutes: spanMin ?? null,
-    ratedHours: round(hrs), // scan-to-scan, the clock the standard uses
+    // spanMinutes / ratedHours deliberately NOT published — see note above.
+    // A rate off a short window is a burst, not a pace. The rate clock also drops
+    // truck setup, so the fewer trucks it spans the more it reads like the loader
+    // never stopped. 18 pallets over 14 rated minutes prints 297% of standard and
+    // that is a property of the window, not a great day — say so rather than
+    // letting a lead take it to a stand-up.
+    shortWindow: hrs > 0 && hrs < 0.5,
     palletsPerHr: rate,
     std: BASES.load.std,
     pctToStd: pct ?? (rate == null ? null : Math.round((rate / BASES.load.std) * 100)),
@@ -118,7 +127,7 @@ function statsForDay(day) {
   }
 
   const associates = pickers.map((p) => {
-    const name = (p.fullName || p.username || "").trim() || "(unnamed)";
+    const name = titleCase((p.fullName || p.username || "").replace(/_/g, " ").trim()) || "(unnamed)";
     const out = { name };
     // Only report a basis someone actually worked, so a picking-only day stays a
     // picking-only brief instead of announcing zero pallets.
@@ -148,7 +157,7 @@ function statsForDay(day) {
     if (covered.has(user)) continue;
     const spanSec = sum(runs.map((r) => (new Date(r.end) - new Date(r.start)) / 1000));
     associates.push({
-      name: runs[0].loaderName || user,
+      name: titleCase((runs[0].loaderName || user).replace(/_/g, " ")),
       loading: loadRow({
         pallets: sum(runs.map((r) => r.pallets)),
         loads: runs.length,
@@ -206,11 +215,11 @@ function statsForDay(day) {
     team.loading = {
       pallets: plt,
       loads: allRuns.length,
-      ratedHours: round(hrs),
       palletsPerHr: rate == null ? null : round(rate),
       std: BASES.load.std,
       pctToStd: rate == null ? null : Math.round((rate / BASES.load.std) * 100),
       aboveStd: rate != null && rate >= BASES.load.std,
+      shortWindow: hrs > 0 && hrs < 0.5,
       loaderCount: loaders.length,
     };
   }
@@ -371,6 +380,7 @@ const system =
   "For pick-size use smallPickShare (the percentage of picks that were 6 cases-equivalent or smaller) and compare it to the prior day's smallPickShare. Do not describe the mix as heavier or lighter from the raw band counts. " +
   `LOADING: report total pallets and pallets/hour against a standard of ${BASES.load.std} plt/hr, with who was above and below. ` +
   "For loading, quote pallets and the rate only. Do NOT state the minutes or hours: the pallet count spans a wider window than the rate clock, so putting both in one sentence reads as a contradiction. " +
+  "If loading 'shortWindow' is true, you MUST caveat the loading rate in the same breath as the percentage: it is measured scan-to-scan with truck setup excluded over a short window, so it reads high and is not a shift-long pace. Do not present it as a standout performance, and do not celebrate it. State the caveat WITHOUT quoting any duration — there are two loading clocks and naming either one beside the rate contradicts the other, which is why no duration is given to you. " +
   "Write 5-8 sentences or tight bullets, plain English, no fluff. " +
   "Name who was above and below standard within each basis — the same person can appear in both. " +
   "If a prior day is given, note the trend for each basis separately. " +
