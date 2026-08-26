@@ -1,12 +1,13 @@
 # Daily Productivity Brief
 
-An AI-generated daily warehouse-productivity summary. It pulls a day's picking
-sessions from a JSON data source, computes the numbers (cases/hour vs a
-standard, per-associate performance, data-quality flags), and asks **Claude** to
+An AI-generated daily warehouse-productivity summary. It pulls a day's sealed
+shift from a JSON data source, computes the numbers (cases and units picked,
+picks/hour vs a standard, pallets/hour vs a standard, per-associate performance,
+data-quality flags), and asks **Claude** to
 write a short plain-English brief a lead can read in 10 seconds.
 
 > Ships with sample data — clone it and run `npm run brief` to see it work.
-> Point `ARCHIVE_URL` at your own data source for live briefs.
+> Point `FLOW_HISTORY_URL` at your own data source for live briefs.
 
 ## What it shows off (resume-wise)
 - Calling the **Claude API** from a real app
@@ -17,8 +18,8 @@ write a short plain-English brief a lead can read in 10 seconds.
 
 ```bash
 npm install
-npm run brief              # latest day in the archive
-npm run brief 2026-07-14   # a specific date
+npm run brief              # latest sealed day
+npm run brief 2026-08-25   # a specific date
 ```
 
 **No API key yet?** It still runs — it prints the computed stats and the exact
@@ -30,12 +31,13 @@ prompt it would send to Claude (a "dry run"), so you can see it working today.
 3. `npm run brief` — now it writes the brief.
 
 ## Options
-- **Your own data:** set `ARCHIVE_URL` in `.env` to a JSON endpoint of saved sessions (e.g. a Firebase Realtime DB `.json` URL). Unset = demo mode with `sample-archive.json`.
+- **Your own data:** set `FLOW_HISTORY_URL` in `.env` to the base path of your sealed-shift archive (a Firebase Realtime DB node, no trailing `.json`), where each child is one day keyed `YYYY-MM-DD`. `BRIEF_DEMO=1` = offline demo with `sample-archive.json`.
 - **Model:** `MODEL` in `brief.js` is `claude-haiku-4-5` (cheap, ~$0.001/brief). Use `claude-opus-4-8` for max quality.
 - **Slack DM:** set `SLACK_BOT_TOKEN` (a Slack app bot token) and `SLACK_DM_TO` (your Slack user ID) in `.env` to have the brief DM'd to you.
 - **Run it every morning:** schedule `npm run brief` with Windows Task Scheduler.
 
 ## How it works (the 3 steps)
-1. `statsForDate()` — computes team cs/hr, % to STD (187), per-associate numbers, and flags bad data.
+1. `statsForDay()` — computes the day's total cases and units picked, team picks/hr vs the 12.8 standard, pallets/hr vs the 26 standard, per-associate numbers, and flags bad data.
+   Picking is **graded on picks/hr only**; cases/hr and units/hr ride along as ungraded context, because a bulk pallet move is one pick but hundreds of cases.
 2. Builds a `system` prompt (the analyst's instructions) + a `user` message (the JSON stats).
 3. `client.messages.create()` — Claude returns the written brief.
