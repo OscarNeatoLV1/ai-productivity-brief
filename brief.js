@@ -381,9 +381,9 @@ const system =
   `LOADING: report total pallets and pallets/hour against a standard of ${BASES.load.std} plt/hr, with who was above and below. ` +
   "For loading, quote pallets and the rate only. Do NOT state the minutes or hours: the pallet count spans a wider window than the rate clock, so putting both in one sentence reads as a contradiction. " +
   "If loading 'shortWindow' is true, you MUST caveat the loading rate in the same breath as the percentage: it is measured scan-to-scan with truck setup excluded over a short window, so it reads high and is not a shift-long pace. Do not present it as a standout performance, and do not celebrate it. State the caveat WITHOUT quoting any duration — there are two loading clocks and naming either one beside the rate contradicts the other, which is why no duration is given to you. " +
-  "Write 5-8 sentences or tight bullets, plain English, no fluff. " +
+  "Plain English, no fluff, no filler adjectives. " +
   "Name who was above and below standard within each basis — the same person can appear in both. " +
-  "If a prior day is given, note the trend for each basis separately. " +
+  "If a prior day is given, cover the trend for each basis separately, in ONE short closing line. " +
   "If there are data flags, mention them as things to double-check. Be encouraging but honest. " +
   "If a basis has no data for the day, omit it silently — do not report it as zero, missing, or a problem. " +
   "If 'stale' is true, OPEN with one short warning line: this is the most recent sealed shift, give its date and how many days old it is, and say the newer shifts may not have been ended. Then write the brief as normal. If 'stale' is false, do not mention the age at all. " +
@@ -395,7 +395,27 @@ const system =
   "This includes crew size and pick mix: you may report those figures beside the rate, but do not claim one CAUSED the other. " +
   // Slack renders mrkdwn, not Markdown: '#' and '**' come through as literal characters.
   "FORMAT: this is delivered as a Slack message. Use Slack mrkdwn only — *single asterisks* for bold, '-' for bullets. " +
-  "Do NOT use '#' headings, '**double asterisks', tables, or a title line (the sender adds one).";
+  "Do NOT use '#' headings, '**double asterisks', tables, or a title line (the sender adds one). " +
+  // Oscar picked this layout by eye out of several drafts (2026-08-26). It is a
+  // TEMPLATE, not a suggestion: a brief read at 6 AM every day is scanned, not read,
+  // and the scan only works if the same number sits in the same place each morning.
+  // Free-form prose drifted its structure daily even with the content rules fixed.
+  "Follow this skeleton EXACTLY, keeping the labels and the order. Omit a whole section only if that basis has no data:\n" +
+  "*PICKING*\n" +
+  "- *Output:* <cases> cases picked | <units> units picked\n" +
+  "- *Crew rate:* <picks/hr> picks/hr (<pct>% of standard), small picks <n>% of the day — <up/down> from <n>% the day before\n" +
+  "- *Individual:*\n" +
+  "    - <Name>: <pct>%\n" +
+  // It reordered a correctly-sorted list when asked for "highest first", so point it
+  // at the payload instead of asking it to sort. The array is already ranked.
+  "    (one line per picker, in the EXACT order they appear in the payload's associates array — that array is already ranked, do not reorder it)\n" +
+  "*LOADING*\n" +
+  "- *Output:* <pallets> pallets at <plt/hr> plt/hr (<pct>% of standard) — <Name>\n" +
+  "- (only if shortWindow: one short caveat line)\n" +
+  // "dipped slightly / pulled significantly" is the kind of line that reads fine and
+  // tells a lead nothing. The prior day's figures are in the payload — quote them.
+  "*Trend:* <one line, picking then loading, each QUOTING the prior day's actual figure — e.g. 'Picks/hr down from 14.7; loading up from 23.1 plt/hr.' Never describe a move in words alone>\n" +
+  "(If there are data flags, add a final '*Check:*' line listing them.)";
 
 // ---- 3) generate the brief (or dry-run if no key) ----
 if (!process.env.ANTHROPIC_API_KEY) {
