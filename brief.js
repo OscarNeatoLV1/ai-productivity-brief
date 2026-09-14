@@ -427,23 +427,98 @@ if (!process.env.ANTHROPIC_API_KEY) {
   process.exit(0);
 }
 
-// Timeout and retries are set EXPLICITLY. The SDK defaults are timeout = 10 min and
-// maxRetries = 2, and timeouts are themselves retried — so one hung call can burn ~30
-// min of wall clock while Task Scheduler kills this run at 15. That is exactly how the
-// 2026-08-12 brief died: the archive fetch retried correctly (hardened in July), then
-// this call hung past the limit and logged nothing at all.
-// 60s is generous for a ~250-output-token brief; worst case is now 3 x 60s.
-const client = new Anthropic({ timeout: 60_000, maxRetries: 2 });
+// ---- Slack sender, used by BOTH the brief and the failure alert ----
+// Defined before the Claude call on purpose: if Claude never answers, the only way
+// Oscar learns that at 6 AM is a DM saying so. A brief that fails silently looks
+// exactly like a brief that was never scheduled.
+async function slackSend(text) {
+  if (!process.env.SLACK_BOT_TOKEN || !process.env.SLACK_DM_TO) return { ok: false, error: "slack_not_configured" };
+  // Same failure mode as the archive fetch: a bare fetch() has NO default timeout, so a
+  // half-connected adapter after wake-from-sleep never answers rather than refusing.
+  try {
+    const r = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+      },
+      body: JSON.stringify({ channel: process.env.SLACK_DM_TO, text }),
+    });
+    const j = await r.json();
+    return { ok: !!j.ok, error: j.error };
+  } catch (e) {
+    return { ok: false, error: `${e.name}: ${e.message}` };
+  }
+}
 
-// Log before each network stage. Without this a hang leaves NO line in brief.log and
-// there is no way to tell which of the three calls wedged.
-console.log("Calling Claude...");
-const res = await client.messages.create({
-  model: MODEL,
-  max_tokens: 1024,
-  system,
-  messages: [{ role: "user", content: "Write today's brief from this data:\n\n" + JSON.stringify(payload, null, 2) }],
-});
+// ---- Claude call, retried across a real outage ----
+//
+// Why an OUTER loop instead of just raising the SDK's maxRetries: the SDK backs off in
+// well under two seconds across its default 2 retries. That covers a one-off blip, but
+// a 529 overloaded_error is a CAPACITY event on Anthropic's side and can persist for
+// minutes — three attempts inside two seconds all land in the same outage and all fail.
+// Spacing the attempts is the thing that actually outlasts it. maxRetries is therefore
+// 0: one retry mechanism, one budget to reason about, not two nested ones.
+//
+// BUDGET (this is the constraint that has killed this script three times — the task's
+// ExecutionTimeLimit is 15 min and a force-terminated run logs nothing):
+//   archive  10 x 15s + 9 x 30s = 7.0 min   (worst case, unchanged)
+//   Claude    4 x 45s + 3 x 20s = 4.0 min
+//   Slack     15s brief + 15s alert         = 0.5 min
+//   total                                  ~11.5 min, ~3.5 min of headroom.
+// If you raise any knob here, redo this arithmetic. Do not eyeball it.
+const CLAUDE_TRIES = +process.env.CLAUDE_TRIES || 4;
+const CLAUDE_TIMEOUT_MS = +process.env.CLAUDE_TIMEOUT_MS || 45000;
+const CLAUDE_WAIT_MS = +process.env.CLAUDE_WAIT_MS || 20000;
+
+const client = new Anthropic({ timeout: CLAUDE_TIMEOUT_MS, maxRetries: 0 });
+
+// Retry capacity and transport failures; never retry a 4xx. A bad model ID or a revoked
+// key fails identically on all four attempts, and burning 4 min to re-confirm it eats
+// headroom the archive fetch may still need.
+const isRetryable = (e) =>
+  e instanceof Anthropic.APIConnectionError ||
+  e instanceof Anthropic.RateLimitError ||
+  (typeof e?.status === "number" && e.status >= 500);
+
+let res;
+for (let i = 1; i <= CLAUDE_TRIES; i++) {
+  // Log BEFORE each attempt. The loop used to log only on failure, so "never reached
+  // the call" and "wedged mid-call" both produced zero output — that ambiguity is what
+  // turned the 08-12 and 08-13 misses into two separate debugging sessions.
+  console.log(`Calling Claude (attempt ${i}/${CLAUDE_TRIES})...`);
+  try {
+    res = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system,
+      messages: [{ role: "user", content: "Write today's brief from this data:\n\n" + JSON.stringify(payload, null, 2) }],
+    });
+    break;
+  } catch (e) {
+    // e.type is the API's own string ("overloaded_error", "rate_limit_error", ...) and
+    // is more specific than the status alone — worth having in the log next time.
+    const why = `${e.status ?? e.name}${e.type ? ` ${e.type}` : ""}: ${e.message}`;
+    if (!isRetryable(e)) {
+      console.error(`Claude failed permanently (${why}) — not retrying.`);
+      await slackSend(`*⚠️ Productivity Brief failed — ${date}*\nClaude rejected the request and it will not self-heal: \`${why}\`\nThe numbers were computed fine; this is the write-up step.`);
+      process.exit(1);
+    }
+    if (i === CLAUDE_TRIES) {
+      console.error(`Claude failed after ${CLAUDE_TRIES} attempts (${why}).`);
+      // Alert, then exit NON-ZERO on purpose: the scheduled task's RestartOnFailure is
+      // 3 x PT15M, so a capacity outage that clears within ~45 min still delivers the
+      // brief on its own. Exiting 0 here would look like success and disarm that.
+      // The marker is deliberately NOT written, so the retry sends the real brief.
+      const alert = await slackSend(`*⚠️ Productivity Brief failed — ${date}*\nClaude was unreachable across ${CLAUDE_TRIES} attempts over ~4 min: \`${why}\`\nThe numbers were computed fine; only the write-up failed. Task Scheduler will retry up to 3x every 15 min.`);
+      console.error(alert.ok ? "Failure alert sent to Slack." : `Failure alert could NOT be sent (${alert.error}).`);
+      process.exit(1);
+    }
+    console.error(`Claude attempt ${i}/${CLAUDE_TRIES} failed (${why}); waiting ${CLAUDE_WAIT_MS / 1000}s`);
+    await new Promise((r) => setTimeout(r, CLAUDE_WAIT_MS));
+  }
+}
 const brief = res.content.find((b) => b.type === "text")?.text ?? "";
 
 console.log(`\n\u{1F4E6} Outbound Productivity Brief — ${date}\n`);
@@ -455,29 +530,11 @@ console.log(`\n(model: ${MODEL} · ${res.usage.input_tokens} in / ${res.usage.ou
 // It DMs *you*, so you can copy it into whatever channel you want.
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_DM_TO) {
   console.log("Sending to Slack...");
-  // Same failure mode as the archive fetch: a bare fetch() has NO default timeout, so a
-  // half-connected adapter after wake-from-sleep never answers rather than refusing.
   // The brief has already printed above, so a Slack failure is logged and swallowed
   // instead of taking down a run whose real work is done.
-  try {
-    const r = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
-      },
-      body: JSON.stringify({
-        channel: process.env.SLACK_DM_TO,
-        text: `*📦 Outbound Productivity Brief — ${date}*\n\n${brief}`,
-      }),
-    });
-    const j = await r.json();
-    console.log(j.ok ? "\n✅ Sent to your Slack DM." : `\n⚠️ Slack error: ${j.error}`);
-    // ONLY a confirmed send marks the day done. If Slack failed, leave the marker
-    // untouched so the next trigger retries rather than assuming delivery happened.
-    if (j.ok) await writeFile(SENT_MARKER, JSON.stringify({ sentOn: localDay(), briefedDate: date }) + "\n");
-  } catch (e) {
-    console.log(`\n⚠️ Slack send failed (${e.name}): ${e.message}`);
-  }
+  const sent = await slackSend(`*📦 Outbound Productivity Brief — ${date}*\n\n${brief}`);
+  console.log(sent.ok ? "\n✅ Sent to your Slack DM." : `\n⚠️ Slack error: ${sent.error}`);
+  // ONLY a confirmed send marks the day done. If Slack failed, leave the marker
+  // untouched so the next trigger retries rather than assuming delivery happened.
+  if (sent.ok) await writeFile(SENT_MARKER, JSON.stringify({ sentOn: localDay(), briefedDate: date }) + "\n");
 }
