@@ -12,7 +12,12 @@
 ' The exit code is propagated so a force-terminated or failed run still looks like a
 ' failure to Task Scheduler, which is what arms RestartOnFailure.
 
-Dim shell, exitCode
+' The bat path is derived from this script's own folder, NOT hardcoded. It used to
+' name a profile ("OscarIbarra") that stopped existing when the Windows profile was
+' rebuilt on 2026-09-10, so every trigger launched nothing at all.
+
+Dim shell, fso, exitCode
 Set shell = CreateObject("WScript.Shell")
-exitCode = shell.Run("""C:\Users\OscarIbarra\projects\productivity-brief\run-brief.bat""", 0, True)
+Set fso = CreateObject("Scripting.FileSystemObject")
+exitCode = shell.Run("""" & fso.GetParentFolderName(WScript.ScriptFullName) & "\run-brief.bat""", 0, True)
 WScript.Quit exitCode
