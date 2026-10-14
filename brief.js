@@ -11,6 +11,8 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { readFile, writeFile } from "node:fs/promises";
+// Anonymous Firebase auth for every neato-ops RTDB fetch (DB denies access without auth since the 2026-10 lockdown).
+import "./fb-anon.cjs";
 
 // ---- WHERE THE NUMBERS COME FROM (changed 2026-08-26) ----
 // This used to read /archives — the hand-typed Associate Tracker in the Managers
